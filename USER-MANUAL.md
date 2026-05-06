@@ -190,6 +190,9 @@ Closing hanabi does **not** kill agent sessions. They keep running in tmux. Rela
 ```bash
 tmux ls                  # list all sessions
 tmux attach -t name      # attach manually
+tmux kill-session -t name        # force-kill a session if hanabi is unresponsive
+tmux kill-session -t tui-control # kill the entire hanabi app if it freezes
+
 ```
 
 ---
