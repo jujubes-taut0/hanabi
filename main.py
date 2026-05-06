@@ -287,13 +287,6 @@ if __name__ == "__main__":
             check=True,
         )
 
-        # Show a welcome hint in the right pane (ASCII only — avoids encoding issues).
-        subprocess.run(
-            [tmux, "send-keys", "-t", f"{session}:0.1",
-             "printf 'select a session ->'", "Enter"],
-            check=False,
-        )
-
         right_pane_id = f"{session}:0.1"
         debug_prefix = "TUI_DEBUG=1 " if os.environ.get("TUI_DEBUG") == "1" else ""
 
@@ -301,6 +294,8 @@ if __name__ == "__main__":
         subprocess.run([tmux, "set-option", "-t", session, "mouse", "on"], check=False, capture_output=True)
         subprocess.run([tmux, "set-option", "-t", session, "pane-border-style", "fg=colour240"], check=False, capture_output=True)
         subprocess.run([tmux, "set-option", "-t", session, "pane-active-border-style", "fg=colour141"], check=False, capture_output=True)
+        # Keep right panes alive after their attached session dies so respawn-pane can reuse them.
+        subprocess.run([tmux, "set-window-option", "-t", f"{session}:0", "remain-on-exit", "on"], check=False, capture_output=True)
         # Wire mouse drag-select to macOS clipboard so cmd+c works after selecting text.
         subprocess.run([tmux, "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"], check=False, capture_output=True)
         subprocess.run([tmux, "bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"], check=False, capture_output=True)
