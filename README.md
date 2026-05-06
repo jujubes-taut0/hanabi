@@ -10,7 +10,7 @@ A terminal dashboard for managing Claude Code agent sessions. hanabi lives in th
   - Session explorer — browse tmux sessions grouped by project folder; open, rename, and kill from the sidebar                                                                                             
   - Session search — search across JSONL session history by keyword with ctrl+f; matching sessions surface with a snippet in context                                                               
   - Sessions survive restart — agents keep running in tmux; relaunch hanabi and everything reappears as-is                                                                                             
-  - Session auto-close — agents can signal completion by printing existence is pain; hanabi kills the session automatically
+  - Session auto-close — agents can signal completion by printing `existence is pain`; hanabi kills the session automatically
                                                                                                          
   Agent monitoring
   - Live status indicators — see at a glance which agents are running, waiting for approval, or error-looping                                                                                          
@@ -28,7 +28,7 @@ A terminal dashboard for managing Claude Code agent sessions. hanabi lives in th
   - Widget pane — configurable stack of data panels on the right; each panel runs a script on an interval and renders its Rich markup output; ships with a built-in agents panel                                
                                   
   Helper                                                                                                 
-  - Hanabi helper — opens a dedicated AI session in the hanabi project directory, so any AI CLI (claude,
+  - Hanabi Helper — opens a dedicated AI session in the hanabi project directory, so any AI CLI (claude,
   etc.) immediately has full project context. Use it as a live interactive manual, build custom widgets, or tweak your dashboard through conversation.
 
 ---
