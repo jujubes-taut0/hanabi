@@ -7,20 +7,14 @@ A terminal dashboard for managing Claude Code agent sessions. hanabi lives in th
 ## Features
 
  Session management                                                                                     
-  - Session explorer — browse tmux sessions grouped by project folder; open, rename, and kill from the   
-  sidebar                                                                                             
-  - Session search — search across JSONL session history by keyword with ctrl+f; matching sessions       
-  surface with a snippet in context                                                               
-  - Sessions survive restart — agents keep running in tmux; relaunch hanabi and everything reappears     
-  as-is                                                                                             
-  - Session auto-close — agents can signal completion by printing existence is pain; hanabi kills the    
-  session automatically
+  - Session explorer — browse tmux sessions grouped by project folder; open, rename, and kill from the sidebar                                                                                             
+  - Session search — search across JSONL session history by keyword with ctrl+f; matching sessions surface with a snippet in context                                                               
+  - Sessions survive restart — agents keep running in tmux; relaunch hanabi and everything reappears as-is                                                                                             
+  - Session auto-close — agents can signal completion by printing existence is pain; hanabi kills the session automatically
                                                                                                          
   Agent monitoring
-  - Live status indicators — see at a glance which agents are running, waiting for approval, or          
-  error-looping                                                                                          
-  - Approval queue — pending Claude Code permission requests surface in a chronological queue; approve or
-   deny with y/n without switching terminals                                                             
+  - Live status indicators — see at a glance which agents are running, waiting for approval, or error-looping                                                                                          
+  - Approval queue — pending Claude Code permission requests surface in a chronological queue; approve or deny with y/n without switching terminals                                                             
   - Todo strip — surfaces in-progress tasks parsed from the active session's agent JSONL log             
   - Watch mode — read-only overlay showing todos, subagent workers, or last output for any session
                                                                                                          
@@ -31,13 +25,11 @@ A terminal dashboard for managing Claude Code agent sessions. hanabi lives in th
   - Themes — kawaii, tron, automata (dark + light)                                                       
                                                                                                          
   Widgets                                                                                                
-  - Widget pane — configurable stack of data panels on the right; each panel runs a script on an interval
-   and renders its Rich markup output; ships with a built-in agents panel                                
-                                     
+  - Widget pane — configurable stack of data panels on the right; each panel runs a script on an interval and renders its Rich markup output; ships with a built-in agents panel                                
+                                  
   Helper                                                                                                 
   - Hanabi helper — opens a dedicated AI session in the hanabi project directory, so any AI CLI (claude,
-  etc.) immediately has full project context. Use it as a live interactive manual, build custom widgets,
-  or tweak your dashboard through conversation.
+  etc.) immediately has full project context. Use it as a live interactive manual, build custom widgets, or tweak your dashboard through conversation.
 
 ---
 
