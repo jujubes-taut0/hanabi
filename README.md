@@ -45,8 +45,8 @@ A terminal dashboard for managing Claude Code agent sessions. hanabi lives in th
 ## Install
 
 ```bash
-git clone https://github.com/jujubes-taut0/hanabi-tui.git
-cd hanabi-tui
+git clone https://github.com/jujubes-taut0/hanabi.git
+cd hanabi
 pip install -r requirements.txt
 ```
 
