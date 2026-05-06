@@ -507,6 +507,8 @@ class ExplorerPane(Vertical):
                 live = session_has_claude(s, self.windows)
                 pane = await asyncio.to_thread(capture_pane, s)
                 waiting = pane_is_waiting(pane) if pane else False
+                if live and not waiting:
+                    _dbg(f"[wait-check] {s!r} live=True waiting=False pane_tail={pane[-120:]!r}")
                 erroring = pane_is_error_looping(pane) if (pane and not waiting) else False
                 return s, pane, waiting, live, erroring
 
