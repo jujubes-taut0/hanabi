@@ -6,22 +6,38 @@ A terminal dashboard for managing Claude Code agent sessions. hanabi lives in th
 
 ## Features
 
-- **Session explorer** — browse, open, rename, and kill tmux sessions grouped by project folder
-- **Live status indicators** — see at a glance which agents are running, waiting for approval, or error-looping
-- **Split modes** — cycle between 1, 2 (vertical or horizontal), and 4-pane layouts with `ctrl+\`
-- **Approval strip** — approve or deny Claude Code permission requests with `y`/`n` without leaving the TUI
-- **Todo strip** — surfaces in-progress tasks parsed from agent JSONL logs
-- **Watch mode** — read-only overlay showing todos, subagent workers, or last output for any session
-- **Session auto-close** — agents can signal completion by printing `existence is pain`; hanabi kills the session automatically
-- **Right-click context menus** — quick actions on any session or folder row
-- **Hanabi helper** — one-click button that opens a dedicated tmux session in the hanabi directory, so any AI CLI (`claude`, etc.) auto-loads project context
-- **Widget pane** — configurable stack of data panels (agent list, Claude usage/limits, shell commands, file watchers)
-- **Custom Python widgets** — write a script that prints Rich markup, hanabi runs it on an interval and displays the output
-- **Pane swap** — swap the TUI and terminal pane sides with `S`
-- **Session search** — fuzzy search across JSONL session history with `ctrl+f`
-- **Drag-to-resize** — sidebar divider and widget handles are all draggable
-- **Sessions survive restart** — agents keep running in tmux; relaunch hanabi and they reappear
-- **Themes** — kawaii, tron, automata (dark + light)
+ Session management                                                                                     
+  - Session explorer — browse tmux sessions grouped by project folder; open, rename, and kill from the   
+  sidebar                                                                                             
+  - Session search — search across JSONL session history by keyword with ctrl+f; matching sessions       
+  surface with a snippet in context                                                               
+  - Sessions survive restart — agents keep running in tmux; relaunch hanabi and everything reappears     
+  as-is                                                                                             
+  - Session auto-close — agents can signal completion by printing existence is pain; hanabi kills the    
+  session automatically
+                                                                                                         
+  Agent monitoring
+  - Live status indicators — see at a glance which agents are running, waiting for approval, or          
+  error-looping                                                                                          
+  - Approval queue — pending Claude Code permission requests surface in a chronological queue; approve or
+   deny with y/n without switching terminals                                                             
+  - Todo strip — surfaces in-progress tasks parsed from the active session's agent JSONL log             
+  - Watch mode — read-only overlay showing todos, subagent workers, or last output for any session
+                                                                                                         
+  Layout & navigation                                                                                    
+  - Split modes — cycle between 1, 2 (vertical or horizontal), and 4-pane layouts with ctrl+\            
+  - Pane swap — swap the TUI and terminal sides with S                                                   
+  - Drag-to-resize — sidebar divider and widget handles are all draggable
+  - Themes — kawaii, tron, automata (dark + light)                                                       
+                                                                                                         
+  Widgets                                                                                                
+  - Widget pane — configurable stack of data panels on the right; each panel runs a script on an interval
+   and renders its Rich markup output; ships with a built-in agents panel                                
+                                     
+  Helper                                                                                                 
+  - Hanabi helper — opens a dedicated AI session in the hanabi project directory, so any AI CLI (claude,
+  etc.) immediately has full project context. Use it as a live interactive manual, build custom widgets,
+  or tweak your dashboard through conversation.
 
 ---
 
