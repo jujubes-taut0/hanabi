@@ -322,13 +322,14 @@ class ExplorerPane(Vertical):
                     result[idx] = parts[1]
         return result
 
-    async def _split_and_get_tty(self, outer_session: str, target: str, flag: str) -> str | None:
+    async def _split_and_get_tty(self, outer_session: str, target: str, flag: str, cwd: str = "") -> str | None:
         """Splits target pane and returns the new pane's TTY."""
         tmux = shutil.which("tmux") or "tmux"
         before = set((await self._get_right_panes(outer_session)).values())
-        await asyncio.to_thread(subprocess.run,
-            [tmux, "split-window", flag, "-t", target],
-            capture_output=True)
+        cmd = [tmux, "split-window", flag, "-t", target]
+        if cwd:
+            cmd += ["-c", cwd]
+        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
         await asyncio.sleep(0.12)
         after = await self._get_right_panes(outer_session)
         new_ttys = [tty for tty in after.values() if tty not in before]
@@ -341,12 +342,20 @@ class ExplorerPane(Vertical):
         outer_session = right_pane.split(":")[0]
         tmux = shutil.which("tmux") or "tmux"
 
+        # Resolve cwd from currently mounted session; fall back to highlighted item
+        cwd = next((w["cwd"] for w in self.windows if w["session"] == self._current_session), "")
+        if not cwd:
+            lv = self.query_one("#explorer-folder-list", ListView)
+            if lv.index is not None and lv.index < len(self.list_items):
+                cwd = self.list_items[lv.index].get("path", "")
+
         all_right = await self._get_right_panes(outer_session)
         if not all_right:
             # No right pane — create base
-            await asyncio.to_thread(subprocess.run,
-                [tmux, "split-window", "-h", "-t", f"{outer_session}:0.0", "-p", "60"],
-                capture_output=True)
+            base_cmd = [tmux, "split-window", "-h", "-t", f"{outer_session}:0.0", "-p", "60"]
+            if cwd:
+                base_cmd += ["-c", cwd]
+            await asyncio.to_thread(subprocess.run, base_cmd, capture_output=True)
             await asyncio.sleep(0.15)
             all_right = await self._get_right_panes(outer_session)
 
@@ -369,30 +378,30 @@ class ExplorerPane(Vertical):
         target_base = f"{outer_session}:0.{base_idx}"
 
         if mode == "2V":
-            tty = await self._split_and_get_tty(outer_session, target_base, "-h")
+            tty = await self._split_and_get_tty(outer_session, target_base, "-h", cwd)
             if tty:
                 self._pane_slots.append({"tty": tty, "session": None})
 
         elif mode == "2H":
-            tty = await self._split_and_get_tty(outer_session, target_base, "-v")
+            tty = await self._split_and_get_tty(outer_session, target_base, "-v", cwd)
             if tty:
                 self._pane_slots.append({"tty": tty, "session": None})
 
         elif mode == "4":
             # top-right (slot 1)
-            tty1 = await self._split_and_get_tty(outer_session, target_base, "-h")
+            tty1 = await self._split_and_get_tty(outer_session, target_base, "-h", cwd)
             if tty1:
                 self._pane_slots.append({"tty": tty1, "session": None})
             # Find top-right pane index for further splits
             all_right2 = await self._get_right_panes(outer_session)
             tr_idx = next((i for i, t in all_right2.items() if t == tty1), None)
             # bottom-left (slot 2)
-            tty2 = await self._split_and_get_tty(outer_session, target_base, "-v")
+            tty2 = await self._split_and_get_tty(outer_session, target_base, "-v", cwd)
             if tty2:
                 self._pane_slots.append({"tty": tty2, "session": None})
             # bottom-right (slot 3)
             if tr_idx is not None:
-                tty3 = await self._split_and_get_tty(outer_session, f"{outer_session}:0.{tr_idx}", "-v")
+                tty3 = await self._split_and_get_tty(outer_session, f"{outer_session}:0.{tr_idx}", "-v", cwd)
                 if tty3:
                     self._pane_slots.append({"tty": tty3, "session": None})
 
@@ -466,19 +475,22 @@ class ExplorerPane(Vertical):
                 if slot < len(self._pane_slots):
                     self._pane_slots[slot]["session"] = session_name
                 return
+            _dbg(f"[switch-client] FAILED rc={sc_r.returncode} — falling back to respawn-pane")
 
-        # Fallback: find pane index from TTY, send attach command to that pane's shell
+        # Fallback: silently replace the pane's process with attach-session via respawn-pane.
+        # respawn-pane -k avoids visible command injection (unlike send-keys).
+        # remain-on-exit keeps the pane alive when the attached session dies.
         all_right = await self._get_right_panes(outer_session)
         slot_pane_idx = next((i for i, t in all_right.items() if t == pane_tty), None)
         target_pane = f"{outer_session}:0.{slot_pane_idx}" if slot_pane_idx else right_pane
-        cmd = f"unset TMUX; tmux attach-session -t {shlex.quote(session_name)}"
-        _dbg(f"[send-keys] slot={slot} -t {target_pane!r} {cmd!r}")
-        send_r = await asyncio.to_thread(subprocess.run,
-            [tmux, "send-keys", "-t", target_pane, cmd, "Enter"],
+        attach_cmd = f"env -u TMUX tmux attach-session -t {shlex.quote(session_name)}"
+        _dbg(f"[respawn-pane] pane_idx={slot_pane_idx} target={target_pane!r} cmd={attach_cmd!r}")
+        rp_r = await asyncio.to_thread(subprocess.run,
+            [tmux, "respawn-pane", "-k", "-t", target_pane, attach_cmd],
             capture_output=True, text=True)
-        _dbg(f"[send-keys] rc={send_r.returncode}" +
-             (f" err={send_r.stderr.strip()!r}" if send_r.stderr.strip() else ""))
-        if send_r.returncode == 0 and slot < len(self._pane_slots):
+        _dbg(f"[respawn-pane] rc={rp_r.returncode}" +
+             (f" err={rp_r.stderr.strip()!r}" if rp_r.stderr.strip() else ""))
+        if rp_r.returncode == 0 and slot < len(self._pane_slots):
             self._pane_slots[slot]["session"] = session_name
 
     async def _poll_status(self) -> None:
@@ -906,13 +918,18 @@ class ExplorerPane(Vertical):
         if item["type"] == "pinned":
             return
         action = await self.app.push_screen_wait(ContextMenuScreen(item))
+        _dbg(f"[ctx] item={item.get('session') or item.get('type')!r} action={action!r}")
         if action == "ctx-open":
+            _dbg(f"[ctx] ctx-open → mount {item['session']!r} path={item['path']!r}")
             asyncio.create_task(self._mount_session(item["session"], item["path"]))
         elif action == "ctx-new":
+            _dbg(f"[ctx] ctx-new → new session in {item['path']!r}")
             asyncio.create_task(self._do_new_session(Path(item["path"])))
         elif action == "ctx-kill":
+            _dbg(f"[ctx] ctx-kill → {item['session']!r}")
             asyncio.create_task(self._kill_session(item["session"]))
         elif action == "ctx-remove":
+            _dbg(f"[ctx] ctx-remove → {item['path']!r}")
             self._remove_folder(item["path"])
 
     async def _toggle_split(self) -> None:
