@@ -1,0 +1,16 @@
+{
+  "sidebar_width_chars": 37,
+  "widgets": [
+    {
+      "id": "agents",
+      "source": "built-in:agents",
+      "height": "1fr"
+    },
+    {
+      "id": "dashboards",
+      "title": "✦ dashboards",
+      "source": "built-in:dashboards",
+      "height": 14
+    }
+  ]
+}
