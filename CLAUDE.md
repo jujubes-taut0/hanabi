@@ -17,7 +17,6 @@ These are mandatory, not suggestions.
 - Modal dialogs → `screens.py` only
 - Explorer pane (session list, splits, approvals, todo strip) → `explorer_pane.py`
 - Widget system (widget layout, resize, reorder, sources) → `widget_pane.py`
-- Usage/cost/limits data rendering → `usage_pane.py`
 - CSS, app-level keybindings, themes, app compose → `main.py` only
 - Layout persistence (sidebar width, widget stack) → `hanabi-layout.json`
 
@@ -39,13 +38,10 @@ hanabi-tui/
 ├── data.py             # All data helpers and formatters (no textual deps)
 ├── explorer_pane.py    # ExplorerPane — session list, splits, approvals, todo strip
 ├── widget_pane.py      # WidgetPane, _W, _ResizeHandle — widget system
-├── usage_pane.py       # UsagePane — claude limits/cost widget source data
 ├── screens.py          # Modal screens — ContextMenuScreen, RenameScreen, ManualScreen
 ├── hanabi-layout.json  # Layout config — sidebar_width_chars + widgets[]
 └── USER-MANUAL.md      # End-user keybinding and feature reference
 ```
-
-`terminal.py` is **deleted**. There is no embedded terminal widget.
 
 ---
 
@@ -63,8 +59,6 @@ On first run (no `TUI_RIGHT_PANE` set), `main.py` bootstraps the environment:
 5. Attaches to the session
 
 When `TUI_RIGHT_PANE` is set, the Textual app runs normally and controls the right pane via `tmux switch-client`.
-
-Debug mode: `TUI_DEBUG=1 python3 main.py` — logs to `/tmp/hanabi-tui-debug.log`.
 
 ---
 
