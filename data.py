@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import collections
 import json
+import plistlib
 import re
 import shutil
 import socket
 import stat
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,7 +22,6 @@ AGENTS_FILE = BASE / "config" / "agents-status.json"
 FOLDERS_FILE = BASE / "config" / "explorer-folders.json"
 DASHBOARDS_FILE = BASE / "config" / "dashboards.json"
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
-SCRIPTS_DIR = BASE / "config" / "scripts"
 
 WAIT_KEYWORDS = [
     "enter to select",
@@ -391,18 +392,97 @@ def load_chat_messages(cwd: str, max_messages: int = 60) -> list[dict]:
     return messages[-max_messages:]
 
 
-async def pick_folder_dialog() -> str | None:
+async def _force_picker_foreground(app_path: str, delay: float = 0.5) -> None:
+    """Fire `open -a <path>` after `delay`s to pull the freshly-launched
+    picker .app to the front. `open -a` is treated by LaunchServices as a
+    user-initiated activation — it bypasses focus-stealing prevention without
+    needing Automation permissions (unlike Apple Events). Best-effort: any
+    failure is swallowed so the picker still works without auto-focus."""
     try:
-        result = await asyncio.to_thread(
+        await asyncio.sleep(delay)
+        await asyncio.to_thread(
             subprocess.run,
-            ["osascript", "-e", 'POSIX path of (choose folder with prompt "Add project folder")'],
+            ["open", "-a", app_path],
             capture_output=True, text=True,
         )
-        if result.returncode != 0:
+    except (OSError, FileNotFoundError, asyncio.CancelledError):
+        pass
+
+
+async def pick_folder_dialog() -> str | None:
+    # Compile the picker to a temp .app and `open -W` it. A plain
+    # `osascript -e ...` subprocess can host the dialog, but its sidebar
+    # bookmarks (Favorites/Locations) silently no-op because the process
+    # isn't a fully LS-registered UI app. Wrapping the script in an .app
+    # bundle gives it that registration, so sidebar clicks resolve.
+    #
+    # The AppleScript uses `delay 0.5` + `tell me to activate` as a first
+    # attempt at focus. To actually beat macOS focus-stealing prevention
+    # (which suppresses focus-grabs from background-launched apps),
+    # _force_picker_foreground fires `open -a <path>` concurrently after
+    # 0.5s — LaunchServices treats that as a user-initiated activation and
+    # pulls the .app to the front without requiring Automation permission.
+    # The .app's Info.plist is rewritten post-compile so the dock label
+    # reads "Add Folder" instead of the bundle filename. The .app writes
+    # the picked POSIX path to a result file via AppleScript file I/O so
+    # we don't depend on `open` forwarding the bundle's stdout.
+    tmpdir = await asyncio.to_thread(tempfile.mkdtemp, prefix="hanabi-picker-")
+    try:
+        app_path = f"{tmpdir}/add-folder.app"
+        scpt_path = f"{tmpdir}/add-folder.scpt"
+        result_path = f"{tmpdir}/result.txt"
+        script = (
+            "delay 0.5\n"
+            "tell me to activate\n"
+            "try\n"
+            "    set thePath to POSIX path of (choose folder with prompt "
+            '"Add project folder" default location (path to home folder))\n'
+            f'    set fh to open for access POSIX file "{result_path}" with write permission\n'
+            "    set eof of fh to 0\n"
+            "    write thePath to fh\n"
+            "    close access fh\n"
+            "end try"
+        )
+        await asyncio.to_thread(Path(scpt_path).write_text, script)
+        compile_result = await asyncio.to_thread(
+            subprocess.run,
+            ["osacompile", "-o", app_path, scpt_path],
+            capture_output=True, text=True,
+        )
+        if compile_result.returncode != 0:
             return None
-        return result.stdout.strip().rstrip("/")
-    except FileNotFoundError:
+        plist_path = Path(app_path) / "Contents" / "Info.plist"
+        try:
+            plist_data = await asyncio.to_thread(plist_path.read_bytes)
+            plist = plistlib.loads(plist_data)
+            plist["CFBundleName"] = "Add Folder"
+            plist["CFBundleDisplayName"] = "Add Folder"
+            await asyncio.to_thread(plist_path.write_bytes, plistlib.dumps(plist))
+        except (OSError, plistlib.InvalidFileException):
+            pass  # label tweak is cosmetic; proceed even if plist rewrite fails
+        activator = asyncio.create_task(_force_picker_foreground(app_path))
+        try:
+            open_result = await asyncio.to_thread(
+                subprocess.run,
+                ["open", "-W", app_path],
+                capture_output=True, text=True,
+            )
+        finally:
+            activator.cancel()
+            try:
+                await activator
+            except asyncio.CancelledError:
+                pass
+        if open_result.returncode != 0:
+            return None
+        result_file = Path(result_path)
+        if not result_file.exists() or result_file.stat().st_size == 0:
+            return None
+        return result_file.read_text().strip().rstrip("/") or None
+    except (OSError, FileNotFoundError):
         return None
+    finally:
+        await asyncio.to_thread(shutil.rmtree, tmpdir, ignore_errors=True)
 
 
 def fmt_bar(pct: float, width: int = 20) -> str:
@@ -419,20 +499,6 @@ def fmt_bar(pct: float, width: int = 20) -> str:
         bar_colored = "█" * full + partial
         bar_dim = "░" * (width - full - 1)
     return f"[{color}]{bar_colored}[/{color}][dim]{bar_dim}[/dim] {pct:.0f}%"
-
-
-def agent_status(ts: str) -> tuple[str, str]:
-    if not ts:
-        return "sleeping", "dim"
-    try:
-        h = (datetime.now(timezone.utc) - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds() / 3600
-    except ValueError:
-        return "sleeping", "dim"
-    if h < 2:    return "active ✨", "green"
-    if h < 12:   return "active",    "green"
-    if h < 48:   return "recent",    "yellow"
-    if h < 168:  return "this week", "magenta"
-    return "idle", "dim"
 
 
 def fmt_ago(ts: str) -> str:
@@ -454,6 +520,38 @@ def fmt_tok(n: int) -> str:
     return str(n)
 
 
+def aggregate_session_tokens(cwd: str, max_bytes: int = 50 * 1024 * 1024) -> int:
+    """Sum input + output tokens from the latest JSONL session for `cwd`.
+    Streams line-by-line, capped at `max_bytes` (default 50 MiB) so a long
+    session can't OOM the widget refresh tick. Returns 0 if no JSONL is found
+    or it is unreadable."""
+    jsonl = _latest_jsonl(cwd)
+    if not jsonl:
+        return 0
+    total = 0
+    bytes_read = 0
+    try:
+        with jsonl.open("r") as f:
+            for line in f:
+                bytes_read += len(line)
+                if bytes_read > max_bytes:
+                    break
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                usage = (evt.get("message") or {}).get("usage")
+                if not usage:
+                    continue
+                try:
+                    total += int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+                except (TypeError, ValueError):
+                    continue
+    except OSError:
+        return 0
+    return total
+
+
 def fmt_resets_in(ts: str) -> str:
     if not ts:
         return ""
@@ -469,16 +567,6 @@ def fmt_resets_in(ts: str) -> str:
         return ""
 
 
-def fmt_dash_row(d: dict, running: bool) -> str:
-    if d.get("type") == "component":
-        fname = Path(d.get("file", "")).name
-        dot = "[dim]·[/dim]"
-        return f"    {dot} [dim]{escape(fname)}[/dim]"
-    dot = "✿" if running else "✧"
-    title = d.get("title") or d.get("project", "?")
-    port = d.get("port", "")
-    port_str = f"[dim]:{port}[/dim]" if port else "[dim](file)[/dim]"
-    return f"{dot} {escape(title)}  {port_str}"
 
 
 def fmt_folder_row(name: str, agent: dict | None, live: bool, waiting: bool) -> str:
