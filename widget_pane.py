@@ -1,42 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
-import os
 import shutil
 import subprocess
-import tempfile
-from datetime import datetime
 from pathlib import Path
 
 from rich.markup import escape
 from textual import events
-
-_DEBUG = os.environ.get("TUI_DEBUG") == "1"
-_DEBUG_LOG = os.path.join(tempfile.gettempdir(), f"hanabi-tui-debug-{os.getuid()}.log")
-
-
-def _dbg(msg: str) -> None:
-    if not _DEBUG:
-        return
-    line = f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} {msg}\n"
-    try:
-        with open(_DEBUG_LOG, "a") as f:
-            f.write(line)
-    except Exception:
-        pass
 from textual.app import ComposeResult
-from textual.containers import Horizontal, ScrollableContainer, Vertical
-from textual.widgets import Button, Static
+from textual.containers import ScrollableContainer, Vertical
+from textual.widgets import Static
 
 from screens import RenameScreen
 
 from data import (
     AGENTS_FILE,
+    aggregate_session_tokens,
     check_port,
     fmt_ago,
     fmt_bar,
     fmt_resets_in,
+    fmt_tok,
     get_tmux_windows,
     jsonl_last_mtime,
     load_agents_by_cwd,
@@ -72,17 +58,32 @@ def load_layout() -> dict:
     try:
         return json.loads(LAYOUT_FILE.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
-        return _DEFAULT_LAYOUT
-
-
-def save_sidebar_width(width: int) -> None:
-    layout = load_layout()
-    layout["sidebar_width_chars"] = width
-    LAYOUT_FILE.write_text(json.dumps(layout, indent=2))
+        return copy.deepcopy(_DEFAULT_LAYOUT)
 
 
 def _save_layout(layout: dict) -> None:
     LAYOUT_FILE.write_text(json.dumps(layout, indent=2))
+
+
+def save_sidebar_width(app, width: int) -> None:
+    """Persist the sidebar width.
+
+    Routes through the live WidgetPane so the in-memory widget layout and the
+    on-disk file stay coherent — without this, a sidebar drag landing between
+    widget reorders could overwrite the new widget order with stale data read
+    back from disk. Falls back to a file-only read-modify-write when no
+    WidgetPane is mounted (early bootstrap path).
+    """
+    try:
+        wp = app.query_one(WidgetPane)
+    except Exception:
+        wp = None
+    if wp is not None:
+        wp.set_sidebar_width(width)
+        return
+    layout = load_layout()
+    layout["sidebar_width_chars"] = width
+    _save_layout(layout)
 
 
 # --- built-in data sources ---
@@ -154,73 +155,58 @@ def _render_limits() -> str:
     return "\n".join(lines)
 
 
+def _render_usage() -> str:
+    windows = get_tmux_windows()
+    agents_by_cwd = load_agents_by_cwd()
+
+    sessions: dict[str, str] = {}
+    for w in windows:
+        s = w["session"]
+        if s not in _AGENTS_SKIP and s not in sessions:
+            sessions[s] = w["cwd"]
+
+    rows: list[tuple[str, int, float]] = []
+    for s, cwd in sessions.items():
+        if not session_has_claude(s, windows):
+            continue
+        tokens = aggregate_session_tokens(cwd)
+        cost = (agents_by_cwd.get(cwd) or {}).get("cost_usd", 0.0)
+        rows.append((s, tokens, cost))
+
+    if not rows:
+        return "[dim]no live sessions[/dim]"
+
+    rows.sort(key=lambda r: r[1], reverse=True)
+    out = ["[dim]session[/dim]        [dim]tokens[/dim]    [dim]cost[/dim]"]
+    for name, tokens, cost in rows:
+        short = (name[:12] + "…") if len(name) > 13 else name
+        out.append(f"[green]✿[/green] {escape(short):<13} {fmt_tok(tokens):>6}   ${cost:>5.2f}")
+    out.append("[dim]today, live sessions[/dim]")
+    return "\n".join(out)
+
+
 def _resolve_source(source: str) -> str | None:
     if source == "built-in:agents":
         return _render_agents()
     if source == "built-in:claude-limits":
         return _render_limits()
+    if source == "built-in:usage":
+        return _render_usage()
     if source.startswith("file:"):
         p = Path(source[5:]).expanduser().resolve()
-        if not str(p).startswith(str(Path.home())):
+        try:
+            p.relative_to(Path.home())
+        except ValueError:
             return "[dim red]file: path outside home — blocked[/dim red]"
-        return p.read_text()
+        try:
+            return p.read_text()
+        except FileNotFoundError:
+            return f"[dim]file not found: {p}[/dim]"
+        except PermissionError:
+            return f"[dim red]permission denied: {p}[/dim red]"
+        except OSError as e:
+            return f"[dim red]read error: {e}[/dim red]"
     return None  # async sources (command:) handled separately
-
-
-WIDGET_TEMPLATE = '''\
-#!/usr/bin/env python3
-"""
-INSTRUCTIONS FOR THE AI FILLING IN THIS WIDGET
-═══════════════════════════════════════════════
-You are writing a hanabi TUI widget. hanabi runs this script as a subprocess
-on a timer, captures stdout, and displays it in a sidebar panel.
-
-HOW IT WORKS:
-  - Script runs every ~15 seconds (or configured refresh_secs)
-  - Everything printed to stdout appears in the widget
-  - Hard timeout: 10 seconds. If the script exceeds this, it is killed and the
-    widget shows "timed out". Cache any slow network/API calls to /tmp/.
-  - Output height is fixed to the widget's configured height (default ~6-14
-    lines). Keep output concise — the most important line should be first.
-
-OUTPUT FORMAT — Rich markup only, no ANSI codes:
-  [bold]text[/bold]      [dim]text[/dim]       [green]text[/green]
-  [red]text[/red]        [yellow]text[/yellow]  [cyan]text[/cyan]
-  Nest them: [bold][green]live[/green][/bold]
-
-RULES:
-  1. Print to stdout only. No input, no prompts, no interactive output.
-  2. Self-contained: all imports inside this file, no hanabi modules.
-  3. Never loop forever or sleep — script must exit cleanly every run.
-  4. Cache slow calls: write results to /tmp/hanabi-{widget-name}-cache.json,
-     check age before re-fetching (e.g. skip if <60s old).
-  5. On error: print a [red]dim error line[/red] and exit — don\'t crash silently.
-
-GOOD USES: GitHub PRs/issues, Jira tickets, Slack summaries, git status,
-  disk/CPU/memory, log tails, API dashboards, countdown timers, weather.
-
-NOT SUITABLE: anything needing >10s, streaming output, user interaction.
-
-When done, tell the user: save the file, then in hanabi use the widget action
-bar (↑ import) and point it at this file. It mounts live — no restart needed.
-"""
-
-# ── widget logic below — replace everything from here down ───────────────────
-
-import sys
-
-title = "my widget"
-rows = [
-    ("[green]✿[/green] status", "ok"),
-    ("[dim]value[/dim]",        "42"),
-    ("[dim]note[/dim]",         "[dim]replace this with real data[/dim]"),
-]
-
-print(f"[bold]{title}[/bold]")
-print()
-for label, value in rows:
-    print(f"  {label:<28} {value}")
-'''
 
 
 # --- widget container ---
@@ -264,14 +250,12 @@ class _W(Vertical):
             return False
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
-        _dbg(f"[drag] mouse_down screen_y={event.screen_y} on_handle={self._on_handle_row(event.screen_y)} wid={self._cfg.get('id')!r}")
         if not self._on_handle_row(event.screen_y):
             return
         self._drag_start_y = event.screen_y
         # for 1fr widgets, snapshot current rendered height as the drag baseline
         h = self._cfg.get("height", 6)
         self._drag_start_h = self.size.height if h == "1fr" else int(h)
-        _dbg(f"[drag] drag started screen_y={event.screen_y} start_h={self._drag_start_h}")
         self.capture_mouse()
         event.stop()
 
@@ -282,13 +266,11 @@ class _W(Vertical):
         new_h = max(2, self._drag_start_h + delta)
         self._cfg["height"] = new_h
         self.styles.height = new_h
-        _dbg(f"[drag] mouse_move delta={delta} new_h={new_h}")
         event.stop()
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
         if self._drag_start_y is None:
             return
-        _dbg(f"[drag] mouse_up — saving h={self._cfg.get('height')}")
         self.release_mouse()
         self._drag_start_y = None
         self._drag_start_h = None
@@ -301,7 +283,6 @@ class _W(Vertical):
 
     def on_focus(self) -> None:
         wid = self._cfg["id"]
-        _dbg(f"[widget] focus wid={wid!r}")
         try:
             hint = f"[bold]✦ {wid}[/bold]  [dim]· drag · < > move · r rename · esc back[/dim]"
             self.query_one(f"#wh-{wid}", Static).update(hint)
@@ -310,14 +291,12 @@ class _W(Vertical):
 
     def on_blur(self) -> None:
         wid = self._cfg["id"]
-        _dbg(f"[widget] blur wid={wid!r}")
         try:
             self.query_one(f"#wh-{wid}", Static).update(f"[dim]✦ {wid}[/dim]")
         except Exception:
             pass
 
     def on_key(self, event) -> None:
-        _dbg(f"[widget] key={event.key!r} wid={self._cfg.get('id')!r}")
         if self._cfg.get("source") == "built-in:dashboards" and self._dash_rows:
             if event.key in ("up", "k"):
                 self._dash_sel = max(0, self._dash_sel - 1)
@@ -480,27 +459,6 @@ class WidgetPane(Vertical):
             except Exception:
                 pass
 
-    def _add_widget_after(self, source: str, widget_id: str, after: "_W | None") -> None:
-        layout = load_layout()
-        existing_ids = {w["id"] for w in layout.get("widgets", [])}
-        if widget_id in existing_ids:
-            widget_id = f"{widget_id}-{len(existing_ids)}"
-        cfg = {"id": widget_id, "source": source, "height": 6, "refresh_secs": 30}
-        widgets_list = layout.setdefault("widgets", [])
-        if after is not None:
-            idx = next((i for i, w in enumerate(widgets_list) if w["id"] == after._cfg["id"]), len(widgets_list) - 1)
-            widgets_list.insert(idx + 1, cfg)
-        else:
-            widgets_list.append(cfg)
-        LAYOUT_FILE.write_text(json.dumps(layout, indent=2))
-        new_w = _W(cfg, id=f"widget-{widget_id}")
-        if after is not None:
-            self.mount(new_w, after=after)
-        else:
-            self.mount(new_w)
-        new_w.styles.height = 6
-        self.app.notify(f"widget '{widget_id}' added", timeout=5)
-
     def _rename_widget(self, target: "_W", new_name: str | None) -> None:
         if not new_name or new_name == target._cfg["id"]:
             return
@@ -513,6 +471,10 @@ class WidgetPane(Vertical):
             target.query_one(f"#wh-{new_name}", Static).update(f"[dim]✦ {new_name}[/dim]")
         except Exception:
             pass
+        self._persist_layout()
+
+    def set_sidebar_width(self, width: int) -> None:
+        self._layout["sidebar_width_chars"] = width
         self._persist_layout()
 
     def _persist_layout(self) -> None:
