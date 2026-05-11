@@ -3,14 +3,15 @@
   "widgets": [
     {
       "id": "agents",
+      "title": "✦ agents",
       "source": "built-in:agents",
       "height": "1fr"
     },
     {
-      "id": "dashboards",
-      "title": "✦ dashboards",
-      "source": "built-in:dashboards",
-      "height": 14
+      "id": "usage",
+      "title": "✦ usage",
+      "source": "built-in:usage",
+      "height": 8
     }
   ]
 }
