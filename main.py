@@ -99,7 +99,7 @@ class _PaneDivider(Widget):
         if self._drag_start_x is None:
             return
         self.release_mouse()
-        save_sidebar_width(self.app.query_one("#explorer-pane").size.width)
+        save_sidebar_width(self.app, self.app.query_one("#explorer-pane").size.width)
         self._drag_start_x = None
         self._drag_start_w = None
         event.stop()
@@ -195,7 +195,7 @@ _ResizeHandle { height: 1; padding: 0 1; }
     def _resize_sidebar(self, delta: int) -> None:
         self._sidebar_width = max(20, min(80, self._sidebar_width + delta))
         self.query_one("#explorer-pane").styles.width = self._sidebar_width
-        save_sidebar_width(self._sidebar_width)
+        save_sidebar_width(self, self._sidebar_width)
 
     def action_cycle_theme(self) -> None:
         self._theme_idx = (self._theme_idx + 1) % len(THEMES)
@@ -248,15 +248,6 @@ if __name__ == "__main__":
     tmux = shutil.which("tmux") or "tmux"
     right_pane = os.environ.get("TUI_RIGHT_PANE", "")
 
-    if os.environ.get("TUI_DEBUG") == "1":
-        from datetime import datetime as _dt
-        with open("/tmp/hanabi-tui-debug.log", "w") as _f:
-            _f.write(f"=== hanabi-tui debug log {_dt.now()} ===\n")
-            _f.write(f"TUI_RIGHT_PANE={right_pane!r}\n")
-        import logging
-        logging.getLogger("textual").setLevel(logging.CRITICAL)
-        logging.getLogger("asyncio").setLevel(logging.CRITICAL)
-
     if right_pane:
         DashboardApp().run()
     else:
@@ -288,7 +279,6 @@ if __name__ == "__main__":
         )
 
         right_pane_id = f"{session}:0.1"
-        debug_prefix = "TUI_DEBUG=1 " if os.environ.get("TUI_DEBUG") == "1" else ""
 
         # Enable mouse mode and pane borders.
         subprocess.run([tmux, "set-option", "-t", session, "mouse", "on"], check=False, capture_output=True)
@@ -303,7 +293,7 @@ if __name__ == "__main__":
         # Launch TUI in left pane with env vars injected.
         subprocess.run(
             [tmux, "send-keys", "-t", f"{session}:0.0",
-             f"{debug_prefix}TUI_RIGHT_PANE={shlex.quote(right_pane_id)} {shlex.quote(sys.executable)} {shlex.quote(script)}",
+             f"TUI_RIGHT_PANE={shlex.quote(right_pane_id)} {shlex.quote(sys.executable)} {shlex.quote(script)}",
              "Enter"],
             check=True,
         )
