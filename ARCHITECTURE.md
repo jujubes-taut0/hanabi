@@ -139,7 +139,6 @@ Key methods:
 | `$HANABI_BASE/config/scripts/` | Optional user scripts | User |
 | `~/.claude/projects/{encoded_cwd}/*.jsonl` | Claude Code session logs | Claude CLI |
 | `{repo}/hanabi-layout.json` | Sidebar width + widget stack | hanabi |
-| `/tmp/hanabi-tui-debug.log` | Debug log (when `TUI_DEBUG=1`) | hanabi |
 
 `HANABI_BASE` defaults to `~/.config/hanabi` (`data.py:18`).
 
@@ -211,7 +210,6 @@ The poll interval is **8 seconds** (`explorer_pane.py:105`). `data.py` exposes t
 |---|---|---|
 | `HANABI_BASE` | `~/.config/hanabi` | Root for config files |
 | `TUI_RIGHT_PANE` | unset | Set by bootstrap to `tui-control:0.1`; presence signals "in tmux, run normally" |
-| `TUI_DEBUG` | unset | When `=1`, logs to `/tmp/hanabi-tui-debug.log` |
 
 ---
 
