@@ -9,20 +9,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-_DEBUG = os.environ.get("TUI_DEBUG") == "1"
-_DEBUG_LOG = "/tmp/hanabi-tui-debug.log"
-
-
-def _dbg(msg: str) -> None:
-    if not _DEBUG:
-        return
-    line = f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} {msg}\n"
-    try:
-        with open(_DEBUG_LOG, "a") as f:
-            f.write(line)
-    except Exception:
-        pass
-
 from rich.markup import escape
 
 from textual import events
@@ -290,20 +276,16 @@ class ExplorerPane(Vertical):
             lv_items[i].query_one(Label).update(label)
 
     async def _mount_session(self, session_name: str, cwd: str) -> None:
-        _dbg(f"[mount] {session_name!r} cwd={cwd!r} slot={self._target_slot}")
         self._current_session = session_name
         asyncio.create_task(self._update_todo_strip(cwd))
         right_pane = os.environ.get("TUI_RIGHT_PANE", "")
         if not right_pane:
-            _dbg("[mount] TUI_RIGHT_PANE not set — no terminal switch")
             return
         tui_session = right_pane.split(":")[0]
         if session_name == tui_session:
-            _dbg(f"[mount] skip {session_name!r} — own session")
             return
         slot = self._target_slot
         if slot < len(self._pane_slots) and self._pane_slots[slot].get("session") == session_name:
-            _dbg(f"[mount] skip terminal switch — slot {slot} already showing {session_name!r}")
             return
         asyncio.create_task(self._switch_right_pane(session_name, right_pane, cwd, slot))
 
@@ -440,7 +422,6 @@ class ExplorerPane(Vertical):
 
         if pane_tty is None:
             # No right panes at all — recreate base pane
-            _dbg("[pane] no right panes — recreating")
             await asyncio.to_thread(subprocess.run,
                 [tmux, "split-window", "-h", "-t", f"{outer_session}:0.0", "-p", "60"],
                 capture_output=True)
@@ -457,9 +438,7 @@ class ExplorerPane(Vertical):
             [tmux, "has-session", "-t", session_name], capture_output=True)
         if has_r.returncode != 0:
             if not cwd:
-                _dbg(f"[pane] session {session_name!r} missing and no cwd — skipping")
                 return
-            _dbg(f"[pane] creating session {session_name!r} in {cwd!r}")
             await asyncio.to_thread(subprocess.run,
                 [tmux, "new-session", "-d", "-s", session_name, "-c", cwd],
                 capture_output=True)
@@ -469,13 +448,10 @@ class ExplorerPane(Vertical):
             sc_r = await asyncio.to_thread(subprocess.run,
                 [tmux, "switch-client", "-c", pane_tty, "-t", session_name],
                 capture_output=True, text=True)
-            _dbg(f"[switch-client] slot={slot} tty={pane_tty} target={session_name!r} rc={sc_r.returncode}" +
-                 (f" err={sc_r.stderr.strip()!r}" if sc_r.stderr.strip() else ""))
             if sc_r.returncode == 0:
                 if slot < len(self._pane_slots):
                     self._pane_slots[slot]["session"] = session_name
                 return
-            _dbg(f"[switch-client] FAILED rc={sc_r.returncode} — falling back to respawn-pane")
 
         # Fallback: silently replace the pane's process with attach-session via respawn-pane.
         # respawn-pane -k avoids visible command injection (unlike send-keys).
@@ -484,12 +460,9 @@ class ExplorerPane(Vertical):
         slot_pane_idx = next((i for i, t in all_right.items() if t == pane_tty), None)
         target_pane = f"{outer_session}:0.{slot_pane_idx}" if slot_pane_idx else right_pane
         attach_cmd = f"env -u TMUX tmux attach-session -t {shlex.quote(session_name)}"
-        _dbg(f"[respawn-pane] pane_idx={slot_pane_idx} target={target_pane!r} cmd={attach_cmd!r}")
         rp_r = await asyncio.to_thread(subprocess.run,
             [tmux, "respawn-pane", "-k", "-t", target_pane, attach_cmd],
             capture_output=True, text=True)
-        _dbg(f"[respawn-pane] rc={rp_r.returncode}" +
-             (f" err={rp_r.stderr.strip()!r}" if rp_r.stderr.strip() else ""))
         if rp_r.returncode == 0 and slot < len(self._pane_slots):
             self._pane_slots[slot]["session"] = session_name
 
@@ -500,15 +473,12 @@ class ExplorerPane(Vertical):
             if slot.get("session") and slot["session"] not in active:
                 slot["session"] = None
         all_sessions = list(active)
-        _dbg(f"[poll] {len(all_sessions)} sessions: {all_sessions}")
 
         if all_sessions:
             async def check(s: str) -> tuple[str, str, bool, bool, bool]:
                 live = session_has_claude(s, self.windows)
                 pane = await asyncio.to_thread(capture_pane, s)
                 waiting = pane_is_waiting(pane) if pane else False
-                if live and not waiting:
-                    _dbg(f"[wait-check] {s!r} live=True waiting=False pane_tail={pane[-120:]!r}")
                 erroring = pane_is_error_looping(pane) if (pane and not waiting) else False
                 return s, pane, waiting, live, erroring
 
@@ -591,7 +561,6 @@ class ExplorerPane(Vertical):
             lv.append(ListItem(Label(label)))
 
         is_visible = bool(self._approvals)
-        _dbg(f"[approvals] {len(self._approvals)} pending")
         if is_visible:
             strip.add_class("visible")
             if not was_visible:
@@ -698,10 +667,8 @@ class ExplorerPane(Vertical):
             return
         idx = lv.index
         if idx is None or idx >= len(self.list_items):
-            _dbg(f"[highlight] idx={idx} out of range (list_items={len(self.list_items)})")
             return
         item = self.list_items[idx]
-        _dbg(f"[highlight] idx={idx} type={item['type']!r} session={item.get('session','')!r} sessions={item.get('sessions',[])!r}")
         if item["type"] in ("session", "worker"):
             asyncio.create_task(self._mount_session(item["session"], item["path"]))
         elif item["type"] == "folder" and item.get("sessions"):
@@ -920,18 +887,13 @@ class ExplorerPane(Vertical):
         if item["type"] == "pinned":
             return
         action = await self.app.push_screen_wait(ContextMenuScreen(item))
-        _dbg(f"[ctx] item={item.get('session') or item.get('type')!r} action={action!r}")
         if action == "ctx-open":
-            _dbg(f"[ctx] ctx-open → mount {item['session']!r} path={item['path']!r}")
             asyncio.create_task(self._mount_session(item["session"], item["path"]))
         elif action == "ctx-new":
-            _dbg(f"[ctx] ctx-new → new session in {item['path']!r}")
             asyncio.create_task(self._do_new_session(Path(item["path"])))
         elif action == "ctx-kill":
-            _dbg(f"[ctx] ctx-kill → {item['session']!r}")
             asyncio.create_task(self._kill_session(item["session"]))
         elif action == "ctx-remove":
-            _dbg(f"[ctx] ctx-remove → {item['path']!r}")
             self._remove_folder(item["path"])
 
     async def _toggle_split(self) -> None:
