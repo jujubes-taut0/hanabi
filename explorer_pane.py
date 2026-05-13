@@ -443,6 +443,12 @@ class ExplorerPane(Vertical):
                 [tmux, "new-session", "-d", "-s", session_name, "-c", cwd],
                 capture_output=True)
 
+        # Disable alt-screen on the nested session's window. Otherwise the inner tmux's alt-screen
+        # compounds with the outer tui-control's pane and Claude's output never reaches scrollback.
+        await asyncio.to_thread(subprocess.run,
+            [tmux, "set-window-option", "-t", f"{session_name}:0", "alternate-screen", "off"],
+            capture_output=True)
+
         # Try switch-client using the slot's TTY
         if pane_tty:
             sc_r = await asyncio.to_thread(subprocess.run,
