@@ -266,6 +266,9 @@ if __name__ == "__main__":
             else:
                 subprocess.run([tmux, "kill-session", "-t", session], capture_output=True)
 
+        # Bump scrollback so mouse-wheel history actually has something to show.
+        subprocess.run([tmux, "set-option", "-g", "history-limit", "50000"], check=False, capture_output=True)
+
         # Create session with a single window; left pane will run the TUI.
         subprocess.run(
             [tmux, "new-session", "-d", "-s", session, "-x", "220", "-y", "50"],
@@ -289,6 +292,20 @@ if __name__ == "__main__":
         # Wire mouse drag-select to macOS clipboard so cmd+c works after selecting text.
         subprocess.run([tmux, "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"], check=False, capture_output=True)
         subprocess.run([tmux, "bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"], check=False, capture_output=True)
+        # Mouse wheel scrolls tmux pane history (works even when the inner app is in alt-screen).
+        # In copy-mode: forward wheel for scrolling. Otherwise: enter copy-mode (-e auto-exits on scroll-to-bottom).
+        subprocess.run(
+            [tmux, "bind-key", "-T", "root", "WheelUpPane",
+             "if-shell", "-F", "-t", "=", "#{pane_in_mode}",
+             "send-keys -M", "copy-mode -e ; send-keys -M"],
+            check=False, capture_output=True,
+        )
+        subprocess.run(
+            [tmux, "bind-key", "-T", "root", "WheelDownPane",
+             "if-shell", "-F", "-t", "=", "#{pane_in_mode}",
+             "send-keys -M", "send-keys -M"],
+            check=False, capture_output=True,
+        )
 
         # Launch TUI in left pane with env vars injected.
         subprocess.run(
